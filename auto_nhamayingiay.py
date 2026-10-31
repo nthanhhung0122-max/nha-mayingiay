@@ -1,0 +1,447 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+====================================================================
+  BOT AUTO PLAY 24/7 TOÀN DIỆN - NHÀ MÁY IN GIẤY (@nhamayingiay_bot)
+  Website: https://nhamayingiay.vercel.app/
+  Bot    : @nhamayingiay_bot
+
+  TÍNH NĂNG TỰ ĐỘNG 100%:
+    1. AUTO INDATA: Tự động lấy init_data mới qua Telethon StringSession.
+    2. AUTO START PRINT: Tự kích hoạt cỗ máy in qua Adsgram (Block 38649)
+       để duy trì dây chuyền in tiền liên tục 24/7.
+    3. AUTO STOP & COLLECT: Canh thời gian ca in tiền kết thúc,
+       tự động gọi /api/stop-print gom toàn bộ Tiền giấy về kho an toàn.
+    4. AUTO UPGRADE: Tự động nâng cấp cấp độ nhà máy qua /api/upgrade khi đủ Bánh Răng Vàng.
+    5. AUTO CLAIM TASKS: Tự động nhận tất cả nhiệm vụ hệ thống qua /api/tasks.
+    6. AUTO CLAIM ADSGRAM BONUS: Nhận Bánh Răng Vàng (Block 38651) & Tiền Giấy (Block 38650).
+====================================================================
+"""
+
+import time
+import json
+import urllib.parse
+import re
+import os
+import asyncio
+import base64
+import requests
+from datetime import datetime
+from colorama import Fore, Style, init
+
+from telethon import TelegramClient
+from telethon.sessions import StringSession
+from telethon.tl.functions.messages import RequestWebViewRequest
+
+init(autoreset=True)
+
+# -----------------------------------------------------------------
+#  CẤU HÌNH HỆ THỐNG
+# -----------------------------------------------------------------
+API_ID = 39182276
+API_HASH = "f02b155d895a3a3fbf8a1cbe810b5338"
+
+KNOWN_GOOD_STRING_SESSION = (
+    "1BVtsOHIBuxmpWiBJ9hvwV9pSrzWw5U2I5Fe20Ww8l1LCk9rnsG6T6lLZEJXZE1JJC_qUH_yyWHnRoed"
+    "RNI5lJYnfjRN4gyGeDrCxquDU12ZflrpCz0VLhMZx2C0LlyUCy2eHRSRE1wUCpEYZaymL0P7Z9eAHwMy4"
+    "Oogewh5TqyO4x4MF6j0yTq8Zvfpv43O4aQDzErNv3GRqpx8DXBcOJIMP9yVhq-Mby5VH5J9cF-h-bJ5ws"
+    "3xKjA4GY7YKjHxDt9OI-Zr7mr-V3qZy99UxJooThJj51f2RqOKhODdLh9XZQ0ygSoAd3iFAZDOPMEo8Ch"
+    "5TrrzLXi2Q3N0HorIL1JfV0xoFQlY="
+)
+
+BOT_USERNAME = "nhamayingiay_bot"
+WEBAPP_URL = "https://nhamayingiay.vercel.app/"
+BASE_URL = "https://nhamayingiay.vercel.app/api"
+
+ADSGRAM_BLOCK_PRINT = "38649"     # Kích hoạt máy in tiền
+ADSGRAM_BLOCK_BANKNOTE = "38650"  # Thưởng 100,000 tiền giấy
+ADSGRAM_BLOCK_GOLD = "38651"      # Thưởng 500 bánh răng vàng
+
+CURRENT_INIT_DATA = ""
+CURRENT_USER_NAME = ""
+CURRENT_USER_ID = "7744031191"
+
+IS_GITHUB_ACTIONS = os.getenv("GITHUB_ACTIONS") == "true"
+MAX_RUNTIME = int(os.getenv("MAX_RUNTIME_SECONDS", "19800" if IS_GITHUB_ACTIONS else "0"))
+
+def log(tag, msg, color=Fore.WHITE):
+    t = datetime.now().strftime("%H:%M:%S")
+    print(f"[{t}] [{tag}] {color}{msg}{Style.RESET_ALL}", flush=True)
+
+def fmt_num(val):
+    try:
+        return f"{int(val):,}"
+    except:
+        return str(val)
+
+def make_dcs(init_d):
+    params = urllib.parse.parse_qsl(init_d)
+    items = []
+    for k, v in params:
+        if k not in ['hash', 'signature']:
+            items.append(f"{k}={v}")
+    items.sort()
+    raw = "\n".join(items)
+    return base64.urlsafe_b64encode(raw.encode('utf-8')).decode('utf-8').rstrip('=')
+
+def get_clean_string_session():
+    raw = (
+        os.getenv("TELEGRAM_STRING_SESSION") or
+        os.getenv("TELEGRAM_SESSION_B64_ACC1") or
+        os.getenv("TELEGRAM_SESSION_B64") or
+        ""
+    ).strip()
+
+    if not raw:
+        return KNOWN_GOOD_STRING_SESSION
+
+    if raw.startswith("1") and 300 <= len(raw) <= 450:
+        return raw
+
+    try:
+        import tempfile, sqlite3
+        from telethon.crypto import AuthKey
+        bdata = base64.b64decode(raw)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".session") as tmp:
+            tmp.write(bdata)
+            tmp_path = tmp.name
+
+        conn = sqlite3.connect(tmp_path)
+        c = conn.cursor()
+        c.execute("SELECT dc_id, server_address, port, auth_key FROM sessions")
+        row = c.fetchone()
+        conn.close()
+        try: os.remove(tmp_path)
+        except Exception: pass
+
+        if row and row[3]:
+            ss = StringSession()
+            ss.set_dc(row[0], row[1], row[2])
+            ss.auth_key = AuthKey(data=row[3])
+            extracted = ss.save()
+            if extracted:
+                return extracted
+    except Exception:
+        pass
+
+    return KNOWN_GOOD_STRING_SESSION
+
+# =================================================================
+#  TỰ ĐỘNG LẤY INIT_DATA QUA TELETHON
+# =================================================================
+async def fetch_fresh_init_data():
+    global CURRENT_INIT_DATA, CURRENT_USER_NAME, CURRENT_USER_ID
+    session_str = get_clean_string_session()
+    client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
+    try:
+        await client.connect()
+        if not await client.is_user_authorized():
+            log("TELETHON_ERR", "Session chưa được xác thực!", Fore.RED)
+            await client.disconnect()
+            return None
+
+        me = await client.get_me()
+        CURRENT_USER_NAME = f"{me.first_name or ''} {me.last_name or ''}".strip()
+        CURRENT_USER_ID = str(me.id)
+
+        bot = await client.get_input_entity(BOT_USERNAME)
+        wv = await client(RequestWebViewRequest(
+            peer=bot,
+            bot=bot,
+            platform="android",
+            from_bot_menu=False,
+            url=WEBAPP_URL
+        ))
+        frag = urllib.parse.urlparse(wv.url).fragment
+        CURRENT_INIT_DATA = urllib.parse.parse_qs(frag).get("tgWebAppData", [None])[0]
+        log("INIT_DATA", f"Lấy initData mới thành công! User: {CURRENT_USER_NAME} (ID: {CURRENT_USER_ID})", Fore.CYAN)
+        await client.disconnect()
+        return CURRENT_INIT_DATA
+    except Exception as e:
+        log("WEBVIEW_ERR", f"Lỗi lấy WebView initData: {e}", Fore.RED)
+        try: await client.disconnect()
+        except: pass
+        return None
+
+def get_fresh_init_data_sync():
+    return asyncio.run(fetch_fresh_init_data())
+
+def get_api_headers():
+    return {
+        "Content-Type": "application/json",
+        "x-init-data": CURRENT_INIT_DATA,
+        "Origin": "https://nhamayingiay.vercel.app",
+        "Referer": "https://nhamayingiay.vercel.app/",
+        "User-Agent": "Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/UQ1A.240205.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.6367.82 Mobile Safari/537.36 Telegram-Android/10.11.1"
+    }
+
+# =================================================================
+#  ADSGRAM SIMULATION ENGINE
+# =================================================================
+def trigger_adsgram_ad(block_id, label="Quảng cáo"):
+    try:
+        parsed = dict(urllib.parse.parse_qsl(CURRENT_INIT_DATA))
+        sig = parsed.get('signature', '')
+        dcs = make_dcs(CURRENT_INIT_DATA)
+
+        ad_headers = {
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/UQ1A.240205.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.6367.82 Mobile Safari/537.36 Telegram-Android/10.11.1',
+            'Origin': 'https://nhamayingiay.vercel.app',
+            'Referer': 'https://nhamayingiay.vercel.app/',
+            'Accept': 'application/json',
+            'X-Requested-With': 'org.telegram.messenger'
+        }
+        params = {
+            'blockId': str(block_id),
+            'tg_id': str(CURRENT_USER_ID),
+            'tg_platform': 'android',
+            'platform': 'Linux aarch64',
+            'language': 'vi',
+            'top_domain': 'vercel.app',
+            'signature': sig,
+            'data_check_string': dcs,
+            'sdk_version': '2.2.5'
+        }
+        log("ADSGRAM", f"Đang yêu cầu Adsgram [{label}] (Block {block_id})...", Fore.YELLOW)
+        r = requests.get('https://api.adsgram.ai/adv', headers=ad_headers, params=params, timeout=12)
+        if r.status_code != 200:
+            log("ADS_WARN", f"Adsgram phản hồi mã {r.status_code}", Fore.YELLOW)
+            return False
+
+        rew_urls = re.findall(r'https://api\.adsgram\.ai/event\?[^\s\'"\\]+', r.text)
+        reward_url = None
+        for u in rew_urls:
+            if 'Reward' in u or 'type=Reward' in u:
+                reward_url = u
+                break
+
+        if not reward_url:
+            log("ADS_WARN", "Không tìm thấy URL xác thực Reward từ Adsgram", Fore.YELLOW)
+            return False
+
+        time.sleep(2)
+        r_rew = requests.get(reward_url, headers=ad_headers, timeout=10)
+        if r_rew.status_code == 200:
+            log("ADS_OK", f"🎉 Xác thực Adsgram [{label}] thành công 100%!", Fore.GREEN)
+            return True
+        return False
+    except Exception as e:
+        log("ADS_ERR", f"Lỗi gọi Adsgram [{label}]: {e}", Fore.RED)
+        return False
+
+# =================================================================
+#  LỚP ĐIỀU KHIỂN NHÀ MÁY IN GIẤY
+# =================================================================
+class PaperFactoryBot:
+    def __init__(self):
+        self.user = {}
+        self.banknotes = 0
+        self.gold = 0
+        self.level = 1
+        self.printing_speed = 10
+        self.is_printing = False
+        self.print_end_time = 0
+        self.telegram_tasks = []
+
+    def fetch_user(self):
+        try:
+            r = requests.post(f"{BASE_URL}/user", headers=get_api_headers(), json={}, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                self.user = data.get("user", {})
+                self.telegram_tasks = data.get("telegramTasks", [])
+                self.banknotes = self.user.get("banknotes", 0)
+                self.gold = self.user.get("gold", 0)
+                self.level = self.user.get("level", 1)
+                self.printing_speed = self.user.get("printingSpeed", 10)
+                self.is_printing = self.user.get("isPrinting", False)
+                self.print_end_time = self.user.get("printEndTime", 0)
+                return True
+            elif r.status_code == 401:
+                log("AUTH", "Token hết hạn! Đang tự động làm mới qua Telethon...", Fore.YELLOW)
+                if get_fresh_init_data_sync():
+                    return self.fetch_user()
+                return False
+            return False
+        except Exception as e:
+            log("API_ERR", f"Lỗi fetch user: {e}", Fore.RED)
+            return False
+
+    def print_dashboard(self):
+        now_ms = int(time.time() * 1000)
+        rem_sec = max(0, int((self.print_end_time - now_ms) / 1000)) if self.is_printing else 0
+        rem_min = rem_sec // 60
+        rem_s = rem_sec % 60
+        status_txt = f"ĐANG IN ({rem_min:02d}:{rem_s:02d})" if self.is_printing else "ĐANG NGHỈ / SẴN SÀNG IN"
+
+        banner = [
+            "=" * 60,
+            "     NHÀ MÁY IN GIẤY - BẢNG ĐIỀU KHIỂN DÂY CHUYỀN",
+            "=" * 60,
+            f" Công nhân   : {CURRENT_USER_NAME} (ID: {CURRENT_USER_ID})",
+            f" Cấp nhà máy : Cấp {self.level} | Tốc độ in: +{self.printing_speed} tờ/giây",
+            f" Trạng thái  : {status_txt}",
+            f" Tiền giấy   : {fmt_num(self.banknotes)} Giấy",
+            f" Bánh răng   : {fmt_num(self.gold)} Vàng",
+            f" Giới thiệu  : {self.user.get('referrals', 0)} bạn bè",
+            "=" * 60
+        ]
+        print("\n" + "\n".join(banner) + "\n", flush=True)
+
+    def start_printing(self):
+        log("PRINT", "🚀 Đang kích hoạt máy in qua Adsgram (Block 38649)...", Fore.YELLOW)
+        ok = trigger_adsgram_ad(ADSGRAM_BLOCK_PRINT, "Khởi động in tiền")
+        if ok:
+            time.sleep(2)
+            # Sync user
+            self.fetch_user()
+            if self.is_printing:
+                log("PRINT_OK", "🎉 DÂY CHUYỀN IN TIỀN ĐÃ KHỞI ĐỘNG THÀNH CÔNG!", Fore.GREEN)
+                return True
+        return False
+
+    def stop_and_collect(self):
+        log("HARVEST", "📥 Ca in đã xong! Đang thu hoạch toàn bộ Tiền Giấy...", Fore.CYAN)
+        try:
+            r = requests.post(f"{BASE_URL}/stop-print", headers=get_api_headers(), json={}, timeout=10)
+            data = r.json()
+            if r.status_code == 200 and data.get("ok", True):
+                new_banknotes = data.get("newBanknotes", self.banknotes)
+                diff = new_banknotes - self.banknotes
+                self.banknotes = new_banknotes
+                self.is_printing = False
+                log("HARVEST_OK", f"🎉 Thu hoạch thành công! +{fmt_num(diff)} Tiền Giấy (Tổng: {fmt_num(self.banknotes)})", Fore.GREEN)
+                return True
+            else:
+                log("HARVEST_WARN", f"Thu hoạch chưa thành công: {data.get('error')}", Fore.YELLOW)
+                return False
+        except Exception as e:
+            log("HARVEST_ERR", f"Lỗi thu hoạch: {e}", Fore.RED)
+            return False
+
+    def claim_all_tasks(self):
+        completed = set(self.user.get("completedTasks", []))
+        default_tasks = [
+            {"id": "t1", "title": "Kênh Nhà Máy In Giấy"},
+            {"id": "t2", "title": "Nhóm Chat Nhà Máy In Giấy"},
+            {"id": "t3", "title": "Kênh Thanh Toán"},
+            {"id": "t4", "title": "Kênh Happy Cow Farm"},
+            {"id": "t5", "title": "Nhóm Chat Happy Cow Farm"},
+            {"id": "v1", "title": "VIP Task 1"},
+            {"id": "v2", "title": "VIP Task 2"},
+            {"id": "v3", "title": "VIP Task 3"},
+            {"id": "v4", "title": "VIP Task 4"},
+            {"id": "v5", "title": "VIP Task 5"},
+            {"id": "v6", "title": "VIP Task 6"},
+            {"id": "v7", "title": "VIP Task 7"}
+        ]
+        all_tasks = default_tasks + self.telegram_tasks
+        for t in all_tasks:
+            tid = t.get("id")
+            title = t.get("title", tid)
+            if tid and tid not in completed:
+                try:
+                    r = requests.post(f"{BASE_URL}/tasks", headers=get_api_headers(), json={"taskId": tid}, timeout=8)
+                    if r.status_code == 200:
+                        log("TASK_CLAIM", f"🎉 Hoàn thành nhiệm vụ [{title}] ({tid})!", Fore.GREEN)
+                        completed.add(tid)
+                    time.sleep(0.5)
+                except Exception:
+                    pass
+
+    def try_upgrade(self):
+        # Tự động nâng cấp nhà máy nếu đủ Bánh Răng Vàng
+        try:
+            r = requests.post(f"{BASE_URL}/upgrade", headers=get_api_headers(), json={
+                "fullName": CURRENT_USER_NAME,
+                "avatar": "https://t.me/i/userpic/320/Zmiju56Xdg-UDWFdmDQaUJbLaUx3f7I4_rH3UQWwoh_acL4656EtBRjrDDLSPb-B.svg"
+            }, timeout=8)
+            data = r.json()
+            if r.status_code == 200:
+                self.level = data.get("newLevel", self.level)
+                self.printing_speed = data.get("newSpeed", self.printing_speed)
+                self.gold = data.get("newGold", self.gold)
+                log("UPGRADE_OK", f"⭐ NÂNG CẤP NHÀ MÁY THÀNH CÔNG LÊN CẤP {self.level}! Tốc độ mới: +{self.printing_speed} tờ/s", Fore.MAGENTA)
+                return True
+        except Exception:
+            pass
+        return False
+
+# =================================================================
+#  VÒNG LẶP CHÍNH 24/7
+# =================================================================
+def main():
+    print(Fore.YELLOW + """
+====================================================================
+|  TOOL AUTO NHÀ MÁY IN GIẤY 24/7 (@nhamayingiay_bot)              |
+|  - TỰ ĐỘNG LẤY INIT_DATA MỚI 100% QUA RAM (TELETHON STRINGSESSION)|
+|  - TỰ KÍCH HOẠT MÁY IN TIỀN QUA ADSGRAM (BLOCK 38649)            |
+|  - TỰ ĐỘNG THU HOẠCH TIỀN GIẤY & TỰ ĐỘNG NÂNG CẤP DÂY CHUYỀN      |
+|  - TỰ ĐỘNG NHẬN TOÀN BỘ NHIỆM VỤ HỆ THỐNG                        |
+====================================================================
+    """ + Style.RESET_ALL)
+
+    if not get_fresh_init_data_sync():
+        log("MAIN", "Không thể lấy initData từ Telegram. Kết thúc!", Fore.RED)
+        return
+
+    bot = PaperFactoryBot()
+    if not bot.fetch_user():
+        log("MAIN", "Không thể lấy thông tin người chơi!", Fore.RED)
+        return
+
+    bot.print_dashboard()
+    bot.claim_all_tasks()
+    bot.try_upgrade()
+
+    start_time = time.time()
+    last_refresh_time = time.time()
+
+    while True:
+        try:
+            if MAX_RUNTIME > 0 and (time.time() - start_time) >= MAX_RUNTIME:
+                log("MAIN", "Hoàn thành thời gian ca trực GitHub Actions. Nghỉ rồi khởi động lại!", Fore.CYAN)
+                break
+
+            now_ms = int(time.time() * 1000)
+
+            # 1. Nếu đang in và đã hết thời gian ca in -> Thu hoạch
+            if bot.is_printing and now_ms >= bot.print_end_time:
+                bot.stop_and_collect()
+                time.sleep(2)
+                bot.try_upgrade()
+
+            # 2. Nếu không in -> Kích hoạt ca in mới
+            if not bot.is_printing:
+                bot.start_printing()
+                time.sleep(2)
+
+            # 3. Tính toán thời gian chờ đến khi ca in kết thúc
+            now_ms = int(time.time() * 1000)
+            if bot.is_printing and bot.print_end_time > now_ms:
+                wait_sec = min(60, int((bot.print_end_time - now_ms) / 1000) + 1)
+                rem_total = int((bot.print_end_time - now_ms) / 1000)
+                m, s = divmod(rem_total, 60)
+                log("STATUS", f"Máy đang in tiền tốc độ +{bot.printing_speed}/s. Ca in còn {m:02d}:{s:02d}. Đang chờ {wait_sec}s...", Fore.GREEN)
+                time.sleep(wait_sec)
+            else:
+                log("STATUS", "Đang đồng bộ trạng thái mới...", Fore.YELLOW)
+                time.sleep(15)
+
+            # Đồng bộ lại dữ liệu
+            bot.fetch_user()
+
+            # Làm mới token sau 30 phút
+            if time.time() - last_refresh_time > 1800:
+                get_fresh_init_data_sync()
+                last_refresh_time = time.time()
+
+        except KeyboardInterrupt:
+            log("MAIN", "Đã dừng chương trình bằng tay.", Fore.YELLOW)
+            break
+        except Exception as e:
+            log("ERR_LOOP", f"Lỗi trong vòng lặp: {e}", Fore.RED)
+            time.sleep(10)
+
+if __name__ == "__main__":
+    main()
