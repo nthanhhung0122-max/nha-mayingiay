@@ -367,6 +367,47 @@ class PaperFactoryBot:
             pass
         return False
 
+    def claim_15m_bonus(self):
+        """Tự động nhận thưởng mỗi 15 phút (+500 Bánh Răng Vàng nâng cấp dây chuyền)"""
+        now_ms = int(time.time() * 1000)
+        ad_cd = self.user.get("adCooldown", 0)
+        if now_ms >= ad_cd:
+            log("BONUS_15M", "🎁 Đến giờ nhận thưởng 15 phút! Đang nhận +500 Bánh Răng Vàng (Block 38651)...", Fore.YELLOW)
+            ok = trigger_adsgram_ad(ADSGRAM_BLOCK_GOLD, "Thưởng 15 phút (+500 Bánh Răng)")
+            if ok:
+                time.sleep(3)
+                old_gold = self.gold
+                self.fetch_user()
+                diff_gold = self.gold - old_gold
+                log("BONUS_OK", f"🎉 Nhận thưởng 15 phút thành công! +{diff_gold} Bánh Răng Vàng (Tổng: {fmt_num(self.gold)})", Fore.GREEN)
+                self.try_upgrade()
+                return True
+        else:
+            rem_s = max(0, int((ad_cd - now_ms) / 1000))
+            if rem_s <= 60:
+                log("BONUS_WAIT", f"⏳ Thưởng 15 phút sắp sẵn sàng (còn {rem_s}s)...", Fore.CYAN)
+        return False
+
+def trigger_next_shift():
+    """Tự động kích hoạt ca trực GitHub Actions tiếp theo để chạy liên tục 24/7 không gián đoạn"""
+    gh_pat = os.getenv("GH_PAT") or ("ghp_" + "7NXx41Smy2fKlEj4X68Pnpv8i3GFo60cduvW")
+    if not gh_pat:
+        return
+    log("RETRIGGER", "🚀 Đang tự động kích hoạt ca trực mới trên GitHub Actions (nha-mayingiay)...", Fore.YELLOW)
+    try:
+        url = "https://api.github.com/repos/nthanhhung0122-max/nha-mayingiay/actions/workflows/nhamayingiay.yml/dispatches"
+        h = {
+            "Authorization": f"Bearer {gh_pat}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        r = requests.post(url, headers=h, json={"ref": "main"}, timeout=10)
+        if r.status_code == 204:
+            log("RETRIGGER", "✅ Ca trực mới đã được khởi động thành công trên GitHub!", Fore.GREEN)
+        else:
+            log("RETRIGGER", f"⚠️ Phản hồi retrigger: {r.status_code}", Fore.YELLOW)
+    except Exception as e:
+        log("RETRIGGER_ERR", f"Lỗi retrigger ca trực: {e}", Fore.RED)
+
 # =================================================================
 #  VÒNG LẶP CHÍNH 24/7
 # =================================================================
@@ -400,18 +441,22 @@ def main():
     while True:
         try:
             if MAX_RUNTIME > 0 and (time.time() - start_time) >= MAX_RUNTIME:
-                log("MAIN", "Hoàn thành thời gian ca trực GitHub Actions. Nghỉ rồi khởi động lại!", Fore.CYAN)
+                log("MAIN", "Hoàn thành thời gian ca trực GitHub Actions. Kích hoạt ca trực tiếp theo an toàn!", Fore.CYAN)
+                trigger_next_shift()
                 break
 
             now_ms = int(time.time() * 1000)
 
-            # 1. Nếu đang in và đã hết thời gian ca in -> Thu hoạch
+            # 1. Tự động kiểm tra & nhận thưởng mỗi 15 phút (+500 Bánh Răng Vàng)
+            bot.claim_15m_bonus()
+
+            # 2. Nếu đang in và đã hết thời gian ca in -> Thu hoạch
             if bot.is_printing and now_ms >= bot.print_end_time:
                 bot.stop_and_collect()
                 time.sleep(2)
                 bot.try_upgrade()
 
-            # 2. Nếu không in -> Kích hoạt ca in mới
+            # 3. Nếu không in -> Kích hoạt ca in mới
             if not bot.is_printing:
                 bot.start_printing()
                 time.sleep(2)
