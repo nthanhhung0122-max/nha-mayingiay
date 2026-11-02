@@ -368,19 +368,18 @@ class PaperFactoryBot:
         return False
 
     def claim_15m_bonus(self):
-        """Tự động nhận thưởng mỗi 15 phút (+500 Bánh Răng Vàng nâng cấp dây chuyền)"""
+        """Tự động nhận thưởng mỗi 15 phút (+100,000 Tiền Giấy)"""
         now_ms = int(time.time() * 1000)
         ad_cd = self.user.get("adCooldown", 0)
         if now_ms >= ad_cd:
-            log("BONUS_15M", "🎁 Đến giờ nhận thưởng 15 phút! Đang nhận +500 Bánh Răng Vàng (Block 38651)...", Fore.YELLOW)
-            ok = trigger_adsgram_ad(ADSGRAM_BLOCK_GOLD, "Thưởng 15 phút (+500 Bánh Răng)")
+            log("BONUS_15M", "🎁 Đến giờ nhận thưởng 15 phút! Đang nhận +100,000 Tiền Giấy (Block 38650)...", Fore.YELLOW)
+            ok = trigger_adsgram_ad(ADSGRAM_BLOCK_BANKNOTE, "Thưởng 15 phút (+100,000 Tiền Giấy)")
             if ok:
                 time.sleep(3)
-                old_gold = self.gold
+                old_banknotes = self.banknotes
                 self.fetch_user()
-                diff_gold = self.gold - old_gold
-                log("BONUS_OK", f"🎉 Nhận thưởng 15 phút thành công! +{diff_gold} Bánh Răng Vàng (Tổng: {fmt_num(self.gold)})", Fore.GREEN)
-                self.try_upgrade()
+                diff_banknotes = self.banknotes - old_banknotes
+                log("BONUS_OK", f"🎉 Nhận thưởng 15 phút thành công! +{fmt_num(diff_banknotes)} Tiền Giấy (Tổng: {fmt_num(self.banknotes)})", Fore.GREEN)
                 return True
         else:
             rem_s = max(0, int((ad_cd - now_ms) / 1000))
@@ -447,7 +446,7 @@ def main():
 
             now_ms = int(time.time() * 1000)
 
-            # 1. Tự động kiểm tra & nhận thưởng mỗi 15 phút (+500 Bánh Răng Vàng)
+            # 1. Tự động kiểm tra & nhận thưởng mỗi 15 phút (+100,000 Tiền Giấy)
             bot.claim_15m_bonus()
 
             # 2. Nếu đang in và đã hết thời gian ca in -> Thu hoạch
