@@ -1,0 +1,37 @@
+name: Auto Nha May In Giay - Acc 3 (nthanhhung0122)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '4 */5 * * *'
+
+concurrency:
+  group: nhamay-acc3
+  cancel-in-progress: true
+
+jobs:
+  run-nhamay-acc3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests telethon colorama
+
+      - name: Chay Auto Nha May In Giay - Acc 3 (nthanhhung0122)
+        env:
+          PYTHONUNBUFFERED: "1"
+          PYTHONIOENCODING: "utf-8"
+          WORKFLOW_FILE: "nhamayingiay_acc3.yml"
+        run: |
+          python auto_nhamayingiay.py --acc 3
