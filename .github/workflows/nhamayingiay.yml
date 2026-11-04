@@ -1,16 +1,16 @@
-name: Auto Nha May In Giay 24/7
+name: Auto Nha May In Giay 24/7 (Combo 4 Accs)
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '0 */5 * * *'
-  workflow_dispatch:
 
 concurrency:
   group: nhamayingiay-run
   cancel-in-progress: true
 
 jobs:
-  run-nhamayingiay:
+  run-nhamay-combo:
     runs-on: ubuntu-latest
     timeout-minutes: 350
 
@@ -28,11 +28,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests telethon colorama
 
-      - name: Chay Bot Nha May In Giay
+      - name: Chay Auto Nha May In Giay Combo 4 Accs 24/7
         env:
           PYTHONUNBUFFERED: "1"
-          GITHUB_ACTIONS: "true"
-          MAX_RUNTIME_SECONDS: "18000"
-          TELEGRAM_STRING_SESSION: ${{ secrets.TELEGRAM_STRING_SESSION || secrets.TELEGRAM_SESSION_B64_ACC1 || secrets.TELEGRAM_SESSION_B64 }}
+          PYTHONIOENCODING: "utf-8"
         run: |
-          python auto_nhamayingiay.py
+          python auto_nhamayingiay_combo.py
