@@ -36,17 +36,74 @@ from telethon.tl.functions.messages import RequestWebViewRequest
 init(autoreset=True)
 
 # -----------------------------------------------------------------
-#  CẤU HÌNH HỆ THỐNG
+#  CẤU HÌNH HỆ THỐNG & ĐA TÀI KHOẢN (Acc 1 -> Acc 4)
 # -----------------------------------------------------------------
-API_ID = 39182276
-API_HASH = "f02b155d895a3a3fbf8a1cbe810b5338"
+import argparse
 
+ACCOUNTS_CONFIG = {
+    1: {
+        "name": "Acc 1 (hungzai22)",
+        "api_id": 39182276,
+        "api_hash": "f02b155d895a3a3fbf8a1cbe810b5338",
+        "session": (
+            "1BVtsOHIBuxmpWiBJ9hvwV9pSrzWw5U2I5Fe20Ww8l1LCk9rnsG6T6lLZEJXZE1JJC_qUH_yyWHnRoed"
+            "RNI5lJYnfjRN4gyGeDrCxquDU12ZflrpCz0VLhMZx2C0LlyUCy2eHRSRE1wUCpEYZaymL0P7Z9eAHwMy4"
+            "Oogewh5TqyO4x4MF6j0yTq8Zvfpv43O4aQDzErNv3GRqpx8DXBcOJIMP9yVhq-Mby5VH5J9cF-h-bJ5ws"
+            "3xKjA4GY7YKjHxDt9OI-Zr7mr-V3qZy99UxJooThJj51f2RqOKhODdLh9XZQ0ygSoAd3iFAZDOPMEo8Ch"
+            "5TrrzLXi2Q3N0HorIL1JfV0xoFQlY="
+        )
+    },
+    2: {
+        "name": "Acc 2 (gaylobucu)",
+        "api_id": 39182276,
+        "api_hash": "f02b155d895a3a3fbf8a1cbe810b5338",
+        "session": (
+            "1BVtsOHIBuzoeRtBOmpNGh2sdyxpZ5e0nY4MrFe-6KKbmJPaM0YnCJiKRI0L9mEh1C5rwqLQqucj456LRF7v"
+            "V1YIPjZNqL6JevLM0Ww3FTml1NoKdwsiPINfsy9MbBlBhKOvha7py44L4pK5aEXjwpjpoNj4LaSmtWaPiQPuf"
+            "JuTwPB86f4gYjSeXM3HtxhnFU7MtHR5vbZPBa9N2HQSlt2BMB47q00DbQVtvYA37R3R-TrtV2MtwixL9ozChAD"
+            "Fq38NYcw4eRyRwKrkobVLccvz0_hvqgHXiQbrfcFLLRkRGwGlRCB-Ew4YhLLdnCbG1hjGEfxUrp9MRmF0JvS"
+            "-u20MfAuvlcgQ="
+        )
+    },
+    3: {
+        "name": "Acc 3 (nthanhhung0122)",
+        "api_id": 39182276,
+        "api_hash": "f02b155d895a3a3fbf8a1cbe810b5338",
+        "session": (
+            "1BVtsOHIBuxrTG6Dt9a8C_J7D3bm1disV_mQiY_mw7AP5Gp-cEVAlKU1cfvOJiDnU6yi7PInfBRG_wJBQ3uNc-1k"
+            "Oa8fM3ITgUcE7YkaCd77FoBTgIFqw6gMYeRfVJOS1U9S_botQyX5764dx94NBfHHm8HuQKejs0PrdAJQq6WUT"
+            "DS3mkijWRWIvO4SwXSUrM5yNOFoGIrav8Mbuyl5ZFQaDPg_kwa11NT4kiqov8rVx0virTbGbQudyFeG80kP4zW2"
+            "CxcuL6TObemIPJgR_2-jb8zVQRQMiI4oN829ZCfHU2JCQY2S2clWwI7onZV8AhYP1LoDBiu32dgQPuk4brS-r"
+            "1DtkySc="
+        )
+    },
+    4: {
+        "name": "Acc 4 (Wind_trader)",
+        "api_id": 34333329,
+        "api_hash": "4f9371f95000578c84dbc670aaf1f819",
+        "session": (
+            "1BVtsOIIBuzNuH5Jfb4Uwek2dG7YRqSyFk-74KTokth0VB3_UTMwM8Edh_ikn83fJOGyN7JaWzIZXnro3ico"
+            "Y8zsjYIlT5nQ4z_GgKknABQ74FRseCvNbz3yyTkPOfQ4xJfZnJIJHuY4EkzVOzQzYZFg_EJWOj_vvg6OVwSk"
+            "Qv9Nd52tl_SlH4TofoxDXDNvxLJyFcoQFH6BegTybx-pFyX2tz0rMeR7AQujnGxqdWOd4zywoFVShzsCTFeq"
+            "dsBP9itJvg1YB0ISmJEYXzGEQo37IddAFGw3PJcAIY4BBctxri9_Cw-FbxhMgLU9gsotA3Rrys2jLcGV4CGf"
+            "Op_IzD0CmtNm845I="
+        )
+    }
+}
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--acc", type=int, default=int(os.getenv("ACC_NUM", "1")), help="Account index 1..4")
+args, _ = parser.parse_known_args()
+acc_data = ACCOUNTS_CONFIG.get(args.acc, ACCOUNTS_CONFIG[1])
+
+ACC_INDEX = args.acc
+ACCOUNT_DISPLAY_NAME = acc_data["name"]
+API_ID = int(os.getenv("TELEGRAM_API_ID") or acc_data["api_id"])
+API_HASH = os.getenv("TELEGRAM_API_HASH") or acc_data["api_hash"]
 KNOWN_GOOD_STRING_SESSION = (
-    "1BVtsOHIBuxmpWiBJ9hvwV9pSrzWw5U2I5Fe20Ww8l1LCk9rnsG6T6lLZEJXZE1JJC_qUH_yyWHnRoed"
-    "RNI5lJYnfjRN4gyGeDrCxquDU12ZflrpCz0VLhMZx2C0LlyUCy2eHRSRE1wUCpEYZaymL0P7Z9eAHwMy4"
-    "Oogewh5TqyO4x4MF6j0yTq8Zvfpv43O4aQDzErNv3GRqpx8DXBcOJIMP9yVhq-Mby5VH5J9cF-h-bJ5ws"
-    "3xKjA4GY7YKjHxDt9OI-Zr7mr-V3qZy99UxJooThJj51f2RqOKhODdLh9XZQ0ygSoAd3iFAZDOPMEo8Ch"
-    "5TrrzLXi2Q3N0HorIL1JfV0xoFQlY="
+    os.getenv(f"TELEGRAM_STRING_SESSION_ACC{ACC_INDEX}") or
+    os.getenv("TELEGRAM_STRING_SESSION") or
+    acc_data["session"]
 )
 
 BOT_USERNAME = "nhamayingiay_bot"
@@ -389,19 +446,20 @@ class PaperFactoryBot:
 
 def trigger_next_shift():
     """Tự động kích hoạt ca trực GitHub Actions tiếp theo để chạy liên tục 24/7 không gián đoạn"""
-    gh_pat = os.getenv("GH_PAT") or ("ghp_" + "7NXx41Smy2fKlEj4X68Pnpv8i3GFo60cduvW")
+    gh_pat = os.getenv("GH_PAT") or ("ghp_" + "4uoxqr79k4DnDki4jYmjIORTKybfeX1XnPbn")
     if not gh_pat:
         return
-    log("RETRIGGER", "🚀 Đang tự động kích hoạt ca trực mới trên GitHub Actions (nha-mayingiay)...", Fore.YELLOW)
+    wf_file = os.getenv("WORKFLOW_FILE") or f"nhamayingiay_acc{ACC_INDEX}.yml"
+    log("RETRIGGER", f"🚀 Đang tự động kích hoạt ca trực mới trên GitHub Actions ({wf_file} - {ACCOUNT_DISPLAY_NAME})...", Fore.YELLOW)
     try:
-        url = "https://api.github.com/repos/nthanhhung0122-max/nha-mayingiay/actions/workflows/nhamayingiay.yml/dispatches"
+        url = f"https://api.github.com/repos/nthanhhung0122-max/nha-mayingiay/actions/workflows/{wf_file}/dispatches"
         h = {
             "Authorization": f"Bearer {gh_pat}",
             "Accept": "application/vnd.github.v3+json"
         }
         r = requests.post(url, headers=h, json={"ref": "main"}, timeout=10)
         if r.status_code == 204:
-            log("RETRIGGER", "✅ Ca trực mới đã được khởi động thành công trên GitHub!", Fore.GREEN)
+            log("RETRIGGER", f"✅ Ca trực mới ({wf_file}) đã được khởi động thành công trên GitHub!", Fore.GREEN)
         else:
             log("RETRIGGER", f"⚠️ Phản hồi retrigger: {r.status_code}", Fore.YELLOW)
     except Exception as e:
