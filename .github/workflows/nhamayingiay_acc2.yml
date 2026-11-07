@@ -3,16 +3,19 @@ name: Auto Nha May In Giay - Acc 2 (gaylobucu)
 on:
   workflow_dispatch:
   schedule:
-    - cron: '2 */5 * * *'
+    - cron: '6 */5 * * *'
 
 concurrency:
-  group: nhamay-acc2
-  cancel-in-progress: true
+  group: nhamayingiay-acc2
+  cancel-in-progress: false
 
 jobs:
-  run-nhamay-acc2:
+  run-nhamayingiay-acc2:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    permissions:
+      contents: write
+      actions: write
 
     steps:
       - name: Checkout repository
@@ -33,5 +36,15 @@ jobs:
           PYTHONUNBUFFERED: "1"
           PYTHONIOENCODING: "utf-8"
           WORKFLOW_FILE: "nhamayingiay_acc2.yml"
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           python auto_nhamayingiay.py --acc 2
+
+      - name: Tu dong ban giao ca tiep theo (Handover Chaining 24/7)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          echo "Kich hoat ca chay tiep theo cho Acc 2..."
+          sleep 10
+          gh workflow run nhamayingiay_acc2.yml --repo "${{ github.repository }}" || echo "Handover triggered."
