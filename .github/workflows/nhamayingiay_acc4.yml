@@ -3,16 +3,19 @@ name: Auto Nha May In Giay - Acc 4 (Wind_trader)
 on:
   workflow_dispatch:
   schedule:
-    - cron: '6 */5 * * *'
+    - cron: '12 */5 * * *'
 
 concurrency:
-  group: nhamay-acc4
-  cancel-in-progress: true
+  group: nhamayingiay-acc4
+  cancel-in-progress: false
 
 jobs:
-  run-nhamay-acc4:
+  run-nhamayingiay-acc4:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    permissions:
+      contents: write
+      actions: write
 
     steps:
       - name: Checkout repository
@@ -33,5 +36,15 @@ jobs:
           PYTHONUNBUFFERED: "1"
           PYTHONIOENCODING: "utf-8"
           WORKFLOW_FILE: "nhamayingiay_acc4.yml"
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           python auto_nhamayingiay.py --acc 4
+
+      - name: Tu dong ban giao ca tiep theo (Handover Chaining 24/7)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          echo "Kich hoat ca chay tiep theo cho Acc 4..."
+          sleep 10
+          gh workflow run nhamayingiay_acc4.yml --repo "${{ github.repository }}" || echo "Handover triggered."
