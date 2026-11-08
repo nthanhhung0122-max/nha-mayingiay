@@ -273,7 +273,7 @@ def trigger_adsgram_ad(block_id, label="Quảng cáo"):
                 break
 
         if not reward_url:
-            log("ADS_WARN", "Không tìm thấy URL xác thực Reward từ Adsgram", Fore.YELLOW)
+            log("ADS_WARN", "Adsgram chưa có lượt xem khả dụng (No fill). Hệ thống sẽ tự động thử lại sau.", Fore.YELLOW)
             return False
 
         time.sleep(2)
@@ -347,14 +347,16 @@ class PaperFactoryBot:
 
     def start_printing(self):
         log("PRINT", "🚀 Đang kích hoạt máy in qua Adsgram (Block 38649)...", Fore.YELLOW)
-        ok = trigger_adsgram_ad(ADSGRAM_BLOCK_PRINT, "Khởi động in tiền")
-        if ok:
-            time.sleep(2)
-            # Sync user
-            self.fetch_user()
-            if self.is_printing:
-                log("PRINT_OK", "🎉 DÂY CHUYỀN IN TIỀN ĐÃ KHỞI ĐỘNG THÀNH CÔNG!", Fore.GREEN)
-                return True
+        for attempt in range(1, 4):
+            ok = trigger_adsgram_ad(ADSGRAM_BLOCK_PRINT, f"Khởi động in tiền (Lần {attempt}/3)")
+            if ok:
+                time.sleep(2)
+                self.fetch_user()
+                if self.is_printing:
+                    log("PRINT_OK", "🎉 DÂY CHUYỀN IN TIỀN ĐÃ KHỞI ĐỘNG THÀNH CÔNG!", Fore.GREEN)
+                    return True
+            if attempt < 3:
+                time.sleep(6)
         return False
 
     def stop_and_collect(self):
@@ -446,7 +448,7 @@ class PaperFactoryBot:
 
 def trigger_next_shift():
     """Tự động kích hoạt ca trực GitHub Actions tiếp theo để chạy liên tục 24/7 không gián đoạn"""
-    gh_pat = os.getenv("GH_PAT") or ("ghp_" + "4uoxqr79k4DnDki4jYmjIORTKybfeX1XnPbn")
+    gh_pat = os.getenv("GH_PAT") or os.getenv("GITHUB_TOKEN") or ("ghp_" + "FCYur5rzRNNzlnnIj4ZCuBKRRs7XKT0bRuKG")
     if not gh_pat:
         return
     wf_file = os.getenv("WORKFLOW_FILE") or f"nhamayingiay_acc{ACC_INDEX}.yml"
@@ -458,7 +460,7 @@ def trigger_next_shift():
             "Accept": "application/vnd.github.v3+json"
         }
         r = requests.post(url, headers=h, json={"ref": "main"}, timeout=10)
-        if r.status_code == 204:
+        if r.status_code in [200, 204]:
             log("RETRIGGER", f"✅ Ca trực mới ({wf_file}) đã được khởi động thành công trên GitHub!", Fore.GREEN)
         else:
             log("RETRIGGER", f"⚠️ Phản hồi retrigger: {r.status_code}", Fore.YELLOW)
@@ -515,8 +517,11 @@ def main():
 
             # 3. Nếu không in -> Kích hoạt ca in mới
             if not bot.is_printing:
-                bot.start_printing()
+                success = bot.start_printing()
                 time.sleep(2)
+                if not success:
+                    log("STATUS", "Chưa thể khởi động máy in (Adsgram chưa có quảng cáo). Sẽ thử lại sau 30s...", Fore.YELLOW)
+                    time.sleep(30)
 
             # 3. Tính toán thời gian chờ đến khi ca in kết thúc
             now_ms = int(time.time() * 1000)
