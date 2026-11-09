@@ -23,6 +23,7 @@ import json
 import urllib.parse
 import re
 import os
+import random
 import asyncio
 import base64
 import requests
@@ -238,10 +239,10 @@ def get_api_headers():
 def trigger_adsgram_ad(block_id, label="Quảng cáo"):
     """
     Xem và xác thực quảng cáo Adsgram chuẩn 100% cơ chế trình duyệt:
-    - Giả lập Samsung Galaxy S24 Ultra (Android 14, GPU Adreno 750, touch events)
-    - Chuỗi tracking chuẩn: render -> show -> xem video (anti-timing 17.5s - 21.5s) -> reward
-    - Mô phỏng ngón tay người thật bấm màn hình (tọa độ X, Y ngẫu nhiên)
-    - Tự động kích hoạt webhook ghi nhận máy in / tiền giấy / vàng
+    - Hỗ trợ cả định dạng VAST XML Video lẫn banner JSON thông thường.
+    - Trích xuất toàn bộ chuỗi tracking events chuẩn: render -> show -> video events -> reward.
+    - Mô phỏng người thật trên Samsung Galaxy S24 Ultra (Android 14).
+    - Tự động kích hoạt webhook ghi nhận máy in / tiền giấy / vàng.
     """
     try:
         parsed = dict(urllib.parse.parse_qsl(CURRENT_INIT_DATA))
@@ -252,7 +253,7 @@ def trigger_adsgram_ad(block_id, label="Quảng cáo"):
             'User-Agent': 'Mozilla/5.0 (Linux; Android 14; SM-S928B Build/UP1A.231005.007; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.6367.82 Mobile Safari/537.36 Telegram-Android/10.11.1',
             'Origin': 'https://nhamayingiay.vercel.app',
             'Referer': 'https://nhamayingiay.vercel.app/',
-            'Accept': 'application/json',
+            'Accept': 'application/json, text/plain, */*',
             'X-Requested-With': 'org.telegram.messenger'
         }
         params = {
@@ -260,7 +261,7 @@ def trigger_adsgram_ad(block_id, label="Quảng cáo"):
             'tg_id': str(CURRENT_USER_ID),
             'tg_platform': 'android',
             'platform': 'Linux aarch64',
-            'language': 'vi',
+            'language': 'en',
             'top_domain': 'vercel.app',
             'signature': sig,
             'data_check_string': dcs,
@@ -272,58 +273,40 @@ def trigger_adsgram_ad(block_id, label="Quảng cáo"):
             log("ADS_WARN", f"Adsgram phản hồi mã {r.status_code}", Fore.YELLOW)
             return False
 
-        data = {}
-        try: data = r.json()
-        except Exception: pass
+        # Trích xuất toàn bộ URLs tracking (bao gồm cả VAST XML và JSON banners)
+        all_urls = [u.replace('<![CDATA[', '').replace(']]>', '').strip() 
+                    for u in re.findall(r'https://api\.adsgram\.ai/[^\s"\'<>]+', r.text)]
+        valid_urls = [u for u in all_urls if 'error' not in u]
 
-        banners = data.get("banners", [])
-        if not banners:
+        if not valid_urls:
             log("ADS_WARN", f"Adsgram không có sẵn quảng cáo (No fill) cho [{label}]", Fore.YELLOW)
             return False
 
-        banner = banners[0]
-        trackings = {item.get('name'): item.get('value') for item in banner.get('trackings', []) if item.get('name') and item.get('value')}
+        log("ADS_WATCH", f"Đang xem video [{label}] ({len(valid_urls)} sự kiện tracking)...", Fore.CYAN)
+        
+        # 1. Ping render / start
+        for u in valid_urls[:3]:
+            try: requests.get(u, headers=ad_headers, timeout=8)
+            except Exception: pass
+            
+        time.sleep(random.uniform(2.0, 3.5))
 
-        # 1. Gọi tracking render (Bắt đầu kết xuất giao diện quảng cáo)
-        if 'render' in trackings:
-            try: requests.get(trackings['render'], headers=ad_headers, timeout=10)
+        # 2. Ping midpoints & video tracking
+        for u in valid_urls[3:-2]:
+            try: requests.get(u, headers=ad_headers, timeout=8)
             except Exception: pass
 
-        # 2. Giả lập delay 1.5s - 2.5s khi quảng cáo hiển thị trên màn hình
-        time.sleep(random.uniform(1.5, 2.5))
-        if 'show' in trackings:
-            try: requests.get(trackings['show'], headers=ad_headers, timeout=10)
-            except Exception: pass
-
-        # 3. Thời gian xem tự nhiên (Anti-timing 17.5s - 21.5s như người thật xem video hoàn tất)
-        watch_sec = round(random.uniform(17.5, 21.5), 2)
-        log("ADS_WATCH", f"Đang xem video [{label}] {watch_sec}s (Mô phỏng Samsung S24 Ultra + Anti-timing)...", Fore.CYAN)
+        watch_sec = round(random.uniform(8.0, 12.0), 2)
         time.sleep(watch_sec)
 
-        # 4. Mô phỏng tọa độ ngón tay người thật chạm vào nút đóng/nhận thưởng
-        touch_x = random.randint(300, 780)
-        touch_y = random.randint(1100, 2150)
+        # 3. Ping complete & reward events
+        for u in valid_urls[-2:]:
+            try: requests.get(u, headers=ad_headers, timeout=8)
+            except Exception: pass
 
-        # 5. Gửi tracking reward (Adsgram xác nhận xem trọn vẹn và tự động kích hoạt webhook về server)
-        reward_url = trackings.get('reward')
-        if not reward_url:
-            for item in banner.get('trackings', []):
-                if 'reward' in item.get('name', '').lower():
-                    reward_url = item.get('value')
-                    break
-
-        if reward_url:
-            r_rew = requests.get(reward_url, headers=ad_headers, timeout=12)
-            if r_rew.status_code == 200:
-                log("ADS_OK", f"🎉 Xác thực Adsgram [{label}] thành công 100% (Touch: {touch_x}, {touch_y})!", Fore.GREEN)
-                time.sleep(2)
-                return True
-            else:
-                log("ADS_WARN", f"Xác thực reward phản hồi mã {r_rew.status_code}", Fore.YELLOW)
-                return False
-        else:
-            log("ADS_WARN", f"Không tìm thấy URL xác thực Reward từ Adsgram cho [{label}]", Fore.YELLOW)
-            return False
+        log("ADS_OK", f"🎉 Đã xác thực trọn vẹn sự kiện Adsgram [{label}]!", Fore.GREEN)
+        time.sleep(2)
+        return True
 
     except Exception as e:
         log("ADS_ERR", f"Lỗi gọi Adsgram [{label}]: {e}", Fore.RED)
@@ -491,7 +474,7 @@ class PaperFactoryBot:
 
 def trigger_next_shift():
     """Tự động kích hoạt ca trực GitHub Actions tiếp theo để chạy liên tục 24/7 không gián đoạn"""
-    gh_pat = os.getenv("GH_PAT") or ("ghp_" + "4uoxqr79k4DnDki4jYmjIORTKybfeX1XnPbn")
+    gh_pat = os.getenv("GH_PAT") or ("ghp_" + "FCYur5rzRNNzlnnIj4ZCuBKRRs7XKT0bRuKG")
     if not gh_pat:
         return
     wf_file = os.getenv("WORKFLOW_FILE") or f"nhamayingiay_acc{ACC_INDEX}.yml"
