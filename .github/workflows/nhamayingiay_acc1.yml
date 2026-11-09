@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: nhamayingiay-acc1
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   run-nhamayingiay-acc1:

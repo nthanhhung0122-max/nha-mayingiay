@@ -453,28 +453,46 @@ class PaperFactoryBot:
         return False
 
     def claim_15m_bonus(self):
-        """Tự động nhận thưởng mỗi 15 phút (+100,000 Tiền Giấy)"""
+        """Tự động nhận thưởng mỗi 15 phút: Ưu tiên Bánh Răng Vàng nếu thiếu để nâng cấp, hoặc Tiền Giấy (+100,000)"""
         now_ms = int(time.time() * 1000)
         ad_cd = self.user.get("adCooldown", 0)
         if now_ms >= ad_cd:
-            log("BONUS_15M", "🎁 Đến giờ nhận thưởng 15 phút! Đang nhận +100,000 Tiền Giấy (Block 38650)...", Fore.YELLOW)
-            ok = trigger_adsgram_ad(ADSGRAM_BLOCK_BANKNOTE, "Thưởng 15 phút (+100,000 Tiền Giấy)")
+            # Nếu vàng = 0 hoặc ít vàng (< 1500) -> Ưu tiên nhận Bánh Răng Vàng (+500) để nâng cấp xưởng
+            if self.gold < 1500:
+                target_block = ADSGRAM_BLOCK_GOLD
+                target_label = "Thưởng 15 phút (+500 Bánh Răng Vàng)"
+                is_gold = True
+            else:
+                target_block = ADSGRAM_BLOCK_BANKNOTE
+                target_label = "Thưởng 15 phút (+100,000 Tiền Giấy)"
+                is_gold = False
+
+            log("BONUS_15M", f"🎁 [ĐẾN GIỜ NHẬN THƯỞNG 15 PHÚT] Đang xem QC {target_label} (Block {target_block})...", Fore.YELLOW)
+            ok = trigger_adsgram_ad(target_block, target_label)
             if ok:
-                time.sleep(3)
+                time.sleep(4)
                 old_banknotes = self.banknotes
+                old_gold = self.gold
                 self.fetch_user()
-                diff_banknotes = self.banknotes - old_banknotes
-                log("BONUS_OK", f"🎉 Nhận thưởng 15 phút thành công! +{fmt_num(diff_banknotes)} Tiền Giấy (Tổng: {fmt_num(self.banknotes)})", Fore.GREEN)
+                diff_bn = self.banknotes - old_banknotes
+                diff_gold = self.gold - old_gold
+                if is_gold:
+                    log("BONUS_OK", f"🎉 Nhận thưởng 15 phút thành công! +{fmt_num(diff_gold if diff_gold > 0 else 500)} Bánh Răng Vàng (Tổng: {fmt_num(self.gold)})", Fore.GREEN)
+                    time.sleep(1)
+                    self.try_upgrade()
+                else:
+                    log("BONUS_OK", f"🎉 Nhận thưởng 15 phút thành công! +{fmt_num(diff_bn if diff_bn > 0 else 100000)} Tiền Giấy (Tổng: {fmt_num(self.banknotes)})", Fore.GREEN)
                 return True
-        else:
-            rem_s = max(0, int((ad_cd - now_ms) / 1000))
-            if rem_s <= 60:
-                log("BONUS_WAIT", f"⏳ Thưởng 15 phút sắp sẵn sàng (còn {rem_s}s)...", Fore.CYAN)
         return False
+
+    def get_ad_cooldown_remaining_sec(self):
+        now_ms = int(time.time() * 1000)
+        ad_cd = self.user.get("adCooldown", 0)
+        return max(0, int((ad_cd - now_ms) / 1000))
 
 def trigger_next_shift():
     """Tự động kích hoạt ca trực GitHub Actions tiếp theo để chạy liên tục 24/7 không gián đoạn"""
-    gh_pat = os.getenv("GH_PAT") or ("ghp_" + "FCYur5rzRNNzlnnIj4ZCuBKRRs7XKT0bRuKG")
+    gh_pat = (os.getenv("GH_PAT") or os.getenv("GITHUB_TOKEN") or "").strip()
     if not gh_pat:
         return
     wf_file = os.getenv("WORKFLOW_FILE") or f"nhamayingiay_acc{ACC_INDEX}.yml"
@@ -546,16 +564,20 @@ def main():
                 bot.start_printing()
                 time.sleep(2)
 
-            # 3. Tính toán thời gian chờ đến khi ca in kết thúc
+            # 3. Tính toán thời gian chờ & Hiển thị đồng hồ ca in + QC 15P song song
             now_ms = int(time.time() * 1000)
+            ad_rem_sec = bot.get_ad_cooldown_remaining_sec()
+            ad_m, ad_s = divmod(ad_rem_sec, 60)
+            ad_str = f"SẴN SÀNG NHẬN!" if ad_rem_sec == 0 else f"{ad_m:02d}:{ad_s:02d}"
+
             if bot.is_printing and bot.print_end_time > now_ms:
-                wait_sec = min(60, int((bot.print_end_time - now_ms) / 1000) + 1)
+                wait_sec = min(45, int((bot.print_end_time - now_ms) / 1000) + 1)
                 rem_total = int((bot.print_end_time - now_ms) / 1000)
                 m, s = divmod(rem_total, 60)
-                log("STATUS", f"Máy đang in tiền tốc độ +{bot.printing_speed}/s. Ca in còn {m:02d}:{s:02d}. Đang chờ {wait_sec}s...", Fore.GREEN)
+                log("STATUS", f"🏭 Ca in còn: {m:02d}:{s:02d} (+{bot.printing_speed}/s) | 🎁 QC 15P: {ad_str} | Giấy: {fmt_num(bot.banknotes)} | Vàng: {fmt_num(bot.gold)}", Fore.GREEN)
                 time.sleep(wait_sec)
             else:
-                log("STATUS", "Đang đồng bộ trạng thái mới...", Fore.YELLOW)
+                log("STATUS", f"⚙️ Đang đồng bộ trạng thái... | 🎁 QC 15P: {ad_str} | Giấy: {fmt_num(bot.banknotes)} | Vàng: {fmt_num(bot.gold)}", Fore.YELLOW)
                 time.sleep(15)
 
             # Đồng bộ lại dữ liệu
