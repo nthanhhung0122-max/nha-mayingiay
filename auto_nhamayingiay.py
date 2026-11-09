@@ -119,6 +119,81 @@ CURRENT_INIT_DATA = ""
 CURRENT_USER_NAME = ""
 CURRENT_USER_ID = "7744031191"
 
+REDEEMED_CODES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nhamay_redeemed_codes.json")
+GIFTCODE_CHANNELS = [-1004350347552, -1004351099294]  # Kênh thông báo & Nhóm chat Nhà Máy In Giấy
+
+def load_redeemed_codes():
+    try:
+        if os.path.exists(REDEEMED_CODES_FILE):
+            with open(REDEEMED_CODES_FILE, "r", encoding="utf-8") as f:
+                return set(json.load(f))
+    except Exception:
+        pass
+    return set()
+
+def save_redeemed_codes(codes_set):
+    try:
+        with open(REDEEMED_CODES_FILE, "w", encoding="utf-8") as f:
+            json.dump(list(codes_set), f, indent=2)
+    except Exception:
+        pass
+
+async def scan_and_redeem_giftcodes(client):
+    redeemed = load_redeemed_codes()
+    found_codes = []
+    for chat_id in GIFTCODE_CHANNELS:
+        try:
+            entity = await client.get_entity(chat_id)
+            async for msg in client.iter_messages(entity, limit=8):
+                if not msg.text:
+                    continue
+                c1 = re.findall(r'`([A-Z0-9]{12})`', msg.text)
+                c2 = re.findall(r'(?:GIFCODE|GIFTCODE|CODE)[^\s]{0,10}([A-Z0-9]{12})', msg.text, re.IGNORECASE)
+                for c in c1 + c2:
+                    if c not in found_codes:
+                        found_codes.append(c)
+        except Exception:
+            pass
+
+    for code in found_codes:
+        if code in redeemed:
+            continue
+        log("GIFTCODE", f"🔍 Phát hiện Giftcode mới: [{code}]! Đang tự động nhập ngay...", Fore.YELLOW)
+        try:
+            r = requests.post(f"{BASE_URL}/giftcode", headers=get_api_headers(), json={"code": code}, timeout=10)
+            data = r.json()
+            if r.status_code == 200 and data.get("success"):
+                reward = data.get("reward", 0)
+                rtype = "Bánh Răng Vàng" if data.get("type") == "gold" else "Tiền Giấy"
+                log("GIFTCODE_OK", f"🎉 NHẬP MÃ GIFTCODE THÀNH CÔNG! Mã [{code}] nhận +{fmt_num(reward)} {rtype}!", Fore.GREEN)
+                redeemed.add(code)
+                save_redeemed_codes(redeemed)
+            else:
+                err = data.get("error", "Lỗi nhập code")
+                log("GIFTCODE_INFO", f"ℹ️ Mã [{code}]: {err}", Fore.YELLOW)
+                redeemed.add(code)
+                save_redeemed_codes(redeemed)
+        except Exception as e:
+            log("GIFTCODE_ERR", f"Lỗi gọi API Giftcode: {e}", Fore.RED)
+
+async def check_giftcodes_quick():
+    session_str = get_clean_string_session()
+    client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
+    try:
+        await client.connect()
+        if await client.is_user_authorized():
+            await scan_and_redeem_giftcodes(client)
+        await client.disconnect()
+    except Exception:
+        try: await client.disconnect()
+        except Exception: pass
+
+def check_giftcodes_sync():
+    try:
+        return asyncio.run(check_giftcodes_quick())
+    except Exception:
+        pass
+
 IS_GITHUB_ACTIONS = os.getenv("GITHUB_ACTIONS") == "true"
 MAX_RUNTIME = int(os.getenv("MAX_RUNTIME_SECONDS", "19800" if IS_GITHUB_ACTIONS else "0"))
 
@@ -213,6 +288,10 @@ async def fetch_fresh_init_data():
         frag = urllib.parse.urlparse(wv.url).fragment
         CURRENT_INIT_DATA = urllib.parse.parse_qs(frag).get("tgWebAppData", [None])[0]
         log("INIT_DATA", f"Lấy initData mới thành công! User: {CURRENT_USER_NAME} (ID: {CURRENT_USER_ID})", Fore.CYAN)
+        try:
+            await scan_and_redeem_giftcodes(client)
+        except Exception as ge:
+            log("GIFTCODE_ERR", f"Lỗi quét giftcode: {ge}", Fore.RED)
         await client.disconnect()
         return CURRENT_INIT_DATA
     except Exception as e:
@@ -453,14 +532,36 @@ class PaperFactoryBot:
         return False
 
     def claim_15m_bonus(self):
-        """Tự động nhận thưởng mỗi 15 phút: 100% chỉ nhận Tiền Giấy (+100,000 Tiền Giấy - Block 38650)"""
+        """
+        Cơ chế nhận thưởng 15P thông minh (Tự động cân đối Vàng & Giấy):
+        - Khi Vàng < 1,500: Bot tự động nhắm vào Block 38651 để nhận +500 Bánh Răng Vàng,
+          sau đó lập tức gọi lệnh /upgrade để nâng cấp cấp độ xưởng (tăng tốc độ in tờ/giây vĩnh viễn).
+        - Khi đã đủ Vàng: Bot tự động chuyển sang Block 38650 nhận +100,000 Tiền Giấy để tối đa hóa số dư rút tiền.
+        """
         now_ms = int(time.time() * 1000)
         ad_cd = self.user.get("adCooldown", 0)
-        if now_ms >= ad_cd:
-            log("BONUS_15M", "🎁 [ĐẾN GIỜ NHẬN THƯỞNG 15 PHÚT] Đang xem QC nhận +100,000 Tiền Giấy (Block 38650)...", Fore.YELLOW)
-            ok = trigger_adsgram_ad(ADSGRAM_BLOCK_BANKNOTE, "Thưởng 15 phút (+100,000 Tiền Giấy)")
+        if now_ms < ad_cd:
+            return False
+
+        GOLD_TARGET = int(os.getenv("GOLD_TARGET", "1500"))
+
+        if self.gold < GOLD_TARGET:
+            log("BONUS_15M", f"🎁 [CÂN ĐỐI THÔNG MINH] Vàng ({fmt_num(self.gold)} < {fmt_num(GOLD_TARGET)}). Đang xem QC nhận +500 Bánh Răng Vàng (Block 38651)...", Fore.YELLOW)
+            ok = trigger_adsgram_ad(ADSGRAM_BLOCK_GOLD, "Thưởng 15P (+500 Vàng)")
             if ok:
-                time.sleep(4)
+                time.sleep(3)
+                old_gold = self.gold
+                self.fetch_user()
+                diff_gold = self.gold - old_gold
+                earned = diff_gold if diff_gold > 0 else 500
+                log("BONUS_OK", f"🎉 Nhận thưởng 15 phút thành công! +{fmt_num(earned)} Bánh Răng Vàng (Tổng: {fmt_num(self.gold)})", Fore.GREEN)
+                self.try_upgrade()
+                return True
+        else:
+            log("BONUS_15M", f"🎁 [CÂN ĐỐI THÔNG MINH] Đã đủ Vàng ({fmt_num(self.gold)} >= {fmt_num(GOLD_TARGET)}). Đang xem QC nhận +100,000 Tiền Giấy (Block 38650)...", Fore.YELLOW)
+            ok = trigger_adsgram_ad(ADSGRAM_BLOCK_BANKNOTE, "Thưởng 15P (+100,000 Tiền Giấy)")
+            if ok:
+                time.sleep(3)
                 old_banknotes = self.banknotes
                 self.fetch_user()
                 diff_bn = self.banknotes - old_banknotes
@@ -524,6 +625,7 @@ def main():
 
     start_time = time.time()
     last_refresh_time = time.time()
+    last_giftcode_scan = time.time()
 
     while True:
         try:
@@ -534,7 +636,7 @@ def main():
 
             now_ms = int(time.time() * 1000)
 
-            # 1. Tự động kiểm tra & nhận thưởng mỗi 15 phút (+100,000 Tiền Giấy)
+            # 1. Cơ chế nhận thưởng 15P thông minh (Tự động cân đối Vàng & Giấy)
             bot.claim_15m_bonus()
 
             # 2. Nếu đang in và đã hết thời gian ca in -> Thu hoạch
@@ -548,20 +650,28 @@ def main():
                 bot.start_printing()
                 time.sleep(2)
 
-            # 3. Tính toán thời gian chờ & Hiển thị đồng hồ ca in + QC 15P song song
+            # 4. Quét Giftcode định kỳ từ Kênh/Group thông báo (~2 phút/lần)
+            if time.time() - last_giftcode_scan > 120:
+                check_giftcodes_sync()
+                last_giftcode_scan = time.time()
+
+            # 5. Tính toán thời gian chờ & Hiển thị đồng hồ ca in + QC 15P song song
             now_ms = int(time.time() * 1000)
             ad_rem_sec = bot.get_ad_cooldown_remaining_sec()
             ad_m, ad_s = divmod(ad_rem_sec, 60)
             ad_str = f"SẴN SÀNG NHẬN!" if ad_rem_sec == 0 else f"{ad_m:02d}:{ad_s:02d}"
 
+            GOLD_TARGET = int(os.getenv("GOLD_TARGET", "1500"))
+            bonus_lbl = "+500 Vàng" if bot.gold < GOLD_TARGET else "+100K Giấy"
+
             if bot.is_printing and bot.print_end_time > now_ms:
                 wait_sec = min(45, int((bot.print_end_time - now_ms) / 1000) + 1)
                 rem_total = int((bot.print_end_time - now_ms) / 1000)
                 m, s = divmod(rem_total, 60)
-                log("STATUS", f"🏭 Ca in còn: {m:02d}:{s:02d} (+{bot.printing_speed}/s) | 🎁 QC 15P (+100K Giấy): {ad_str} | Tổng Giấy: {fmt_num(bot.banknotes)}", Fore.GREEN)
+                log("STATUS", f"🏭 Ca in còn: {m:02d}:{s:02d} (+{bot.printing_speed}/s) | 🎁 QC 15P ({bonus_lbl}): {ad_str} | 💰 Vàng: {fmt_num(bot.gold)} | 💵 Giấy: {fmt_num(bot.banknotes)}", Fore.GREEN)
                 time.sleep(wait_sec)
             else:
-                log("STATUS", f"⚙️ Đang đồng bộ trạng thái... | 🎁 QC 15P (+100K Giấy): {ad_str} | Tổng Giấy: {fmt_num(bot.banknotes)}", Fore.YELLOW)
+                log("STATUS", f"⚙️ Đang đồng bộ... | 🎁 QC 15P ({bonus_lbl}): {ad_str} | 💰 Vàng: {fmt_num(bot.gold)} | 💵 Giấy: {fmt_num(bot.banknotes)}", Fore.YELLOW)
                 time.sleep(15)
 
             # Đồng bộ lại dữ liệu
